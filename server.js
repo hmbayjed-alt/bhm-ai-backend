@@ -59,3 +59,52 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
 
     // আমাদের {role:'user'|'assistant', content:'...'} ফরম্যাটকে Gemini-র
     // {role:'user'|'model', parts:[{text}]} ফরম্যাটে রূপান্তর
+    const contents = trimmed.map((m, idx) => {
+      const parts = [{ text: m.content }];
+      // সবশেষ মেসেজে যদি ছবি সংযুক্ত থাকে, সেটা inlineData হিসেবে যোগ করা হয়
+      const isLast = idx === trimmed.length - 1;
+      if (isLast && image && image.data && image.mimeType) {
+        parts.push({ inlineData: { mimeType: image.mimeType, data: image.data } });
+      }
+      return {
+        role: m.role === 'assistant' ? 'model' : 'user',
+        parts
+      };
+    });
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${API_KEY}`;
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents,
+        systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+        generationConfig: { maxOutputTokens: 1000 }
+      })
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error('Gemini API error:', response.status, errText);
+      if (response.status === 429) {
+        return res.status(429).json({ error: 'ফ্রি টায়ারের সীমা শেষ — কিছুক্ষণ পর আবার চেষ্টা করুন।' });
+      }
+      return res.status(502).json({ error: 'AI সার্ভিস থেকে উত্তর পাওয়া যায়নি।' });
+    }
+
+    const data = await response.json();
+    const parts = data?.candidates?.[0]?.content?.parts || [];
+    const reply = parts.map((p) => p.text || '').join('\n').trim()
+      || 'দুঃখিত, উত্তর তৈরি করা যায়নি। আবার চেষ্টা করুন।';
+
+    res.json({ reply });
+  } catch (err) {
+    console.error('Server error:', err);
+    res.status(500).json({ error: 'সার্ভারে একটি সমস্যা হয়েছে।' });
+  }
+});
+
+app.listen(PORT, () => {
+  console.log(`✅ BHM AI backend চলছে: http://localhost:${PORT}`);
+});
