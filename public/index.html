@@ -530,7 +530,19 @@ async function sendMessage(){
     input.placeholder = 'আপনার প্রশ্ন লিখুন...';
     sendBtn.disabled = true;
     addTyping();
-    const url = buildImageUrl(text);
+    let finalPrompt = text;
+    try{
+      const enhanceRes = await fetch('/api/enhance-prompt', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ prompt: text })
+      });
+      if(enhanceRes.ok){
+        const enhanceData = await enhanceRes.json();
+        if(enhanceData.prompt) finalPrompt = enhanceData.prompt;
+      }
+    }catch(e){ /* ব্যর্থ হলে মূল টেক্সট দিয়েই এগোনো হবে */ }
+    const url = buildImageUrl(finalPrompt);
     const img = new Image();
     img.onload = () => {
       removeTyping();
