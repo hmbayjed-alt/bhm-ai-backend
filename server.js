@@ -125,6 +125,53 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
   }
 });
 
+const IMAGE_MODEL = process.env.IMAGE_MODEL || 'gemini-2.5-flash-image';
+
+app.post('/api/generate-image', chatLimiter, async (req, res) => {
+  try {
+    const { prompt } = req.body;
+    if (!prompt || typeof prompt !== 'string') {
+      return res.status(400).json({ error: 'prompt দরকার।' });
+    }
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${IMAGE_MODEL}:generateContent?key=${API_KEY}`;
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: prompt }] }]
+      })
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error('Gemini image API error:', response.status, errText);
+      if (response.status === 429) {
+        return res.status(429).json({ error: 'ছবি বানানোর ফ্রি সীমা আজকের মতো শেষ — কিছুক্ষণ পর আবার চেষ্টা করুন।' });
+      }
+      return res.status(502).json({ error: 'ছবি বানানো যায়নি, আবার চেষ্টা করুন।' });
+    }
+
+    const data = await response.json();
+    const parts = data?.candidates?.[0]?.content?.parts || [];
+    const imagePart = parts.find((p) => p.inlineData && p.inlineData.data);
+    const textPart = parts.find((p) => p.text);
+
+    if (!imagePart) {
+      return res.status(502).json({ error: 'ছবি বানানো যায়নি, প্রম্পটটা আরেকভাবে লিখে চেষ্টা করুন।' });
+    }
+
+    res.json({
+      image: { mimeType: imagePart.inlineData.mimeType, data: imagePart.inlineData.data },
+      caption: textPart ? textPart.text : ''
+    });
+  } catch (err) {
+    console.error('Image generation server error:', err);
+    res.status(500).json({ error: 'সার্ভারে একটি সমস্যা হয়েছে।' });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`✅ BHM AI backend চলছে: http://localhost:${PORT}`);
 });
