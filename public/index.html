@@ -351,6 +351,26 @@ let history = [];
 let pendingImage = null; // { mimeType, data (base64, no data: prefix), previewUrl }
 
 const MAX_IMAGE_MB = 4;
+const STORAGE_KEY = 'bhm_ai_chat_history';
+
+function saveHistoryToStorage(){
+  try{
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
+  }catch(e){ /* স্টোরেজ ভর্তি বা অনুপলব্ধ হলে চুপচাপ উপেক্ষা করা হবে */ }
+}
+
+function loadHistoryFromStorage(){
+  try{
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if(!saved) return;
+    const parsed = JSON.parse(saved);
+    if(!Array.isArray(parsed) || parsed.length === 0) return;
+    history = parsed;
+    parsed.forEach(m => {
+      addMessage(m.role === 'assistant' ? 'bot' : 'user', m.content);
+    });
+  }catch(e){ /* সংরক্ষিত ডেটা নষ্ট হলে চুপচাপ উপেক্ষা করা হবে */ }
+}
 
 attachBtn.addEventListener('click', () => fileInput.click());
 
@@ -455,6 +475,7 @@ function removeTyping(){
 
 async function callBHM(userText, image){
   history.push({role:'user', content: userText});
+  saveHistoryToStorage();
   const body = { messages: history };
   if(image){ body.image = { mimeType: image.mimeType, data: image.data }; }
   const res = await fetch('/api/chat', {
@@ -469,6 +490,7 @@ async function callBHM(userText, image){
   const data = await res.json();
   const reply = data.reply || 'দুঃখিত, উত্তর তৈরি করা যায়নি। আবার চেষ্টা করুন।';
   history.push({role:'assistant', content: reply});
+  saveHistoryToStorage();
   return reply;
 }
 
@@ -490,7 +512,7 @@ async function sendMessage(){
     addMessage('bot', reply);
   }catch(err){
     removeTyping();
-    addMessage('bot', 'দুঃখিত, একটি সমস্যা হয়েছে। ইন্টারনেট সংযোগ পরীক্ষা করে আবার চেষ্টা করুন।');
+    addMessage('bot', err.message && err.message !== 'request failed' ? err.message : 'দুঃখিত, একটি সমস্যা হয়েছে। ইন্টারনেট সংযোগ পরীক্ষা করে আবার চেষ্টা করুন।');
   }finally{
     sendBtn.disabled = false;
     input.focus();
@@ -510,10 +532,14 @@ input.addEventListener('keydown', (e)=>{
 
 newChatBtn.addEventListener('click', ()=>{
   history = [];
+  saveHistoryToStorage();
   main.innerHTML = '';
   main.appendChild(intro);
   input.value = '';
 });
+
+// পেজ লোড হওয়ার সময় আগের সংরক্ষিত কথোপকথন থাকলে সেটা ফিরিয়ে আনা
+loadHistoryFromStorage();
 
 /* Voice input (Web Speech API) — works in any language chosen from the selector */
 let recognition = null;
