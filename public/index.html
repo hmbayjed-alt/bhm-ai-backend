@@ -364,18 +364,9 @@ imageGenBtn.addEventListener('click', () => {
   input.focus();
 });
 
-async function generateImage(prompt){
-  const res = await fetch('/api/generate-image', {
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ prompt })
-  });
-  if(!res.ok){
-    const errData = await res.json().catch(()=>({}));
-    throw new Error(errData.error || 'request failed');
-  }
-  const data = await res.json();
-  return data; // { image: {mimeType, data}, caption }
+function buildImageUrl(prompt){
+  const seed = Math.floor(Math.random() * 1000000);
+  return `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=768&height=768&nologo=true&seed=${seed}`;
 }
 
 let history = [];
@@ -539,18 +530,21 @@ async function sendMessage(){
     input.placeholder = 'আপনার প্রশ্ন লিখুন...';
     sendBtn.disabled = true;
     addTyping();
-    try{
-      const result = await generateImage(text);
+    const url = buildImageUrl(text);
+    const img = new Image();
+    img.onload = () => {
       removeTyping();
-      const dataUrl = `data:${result.image.mimeType};base64,${result.image.data}`;
-      addMessage('bot', result.caption || '', dataUrl);
-    }catch(err){
-      removeTyping();
-      addMessage('bot', err.message && err.message !== 'request failed' ? err.message : 'দুঃখিত, ছবি বানানো যায়নি। আবার চেষ্টা করুন।');
-    }finally{
+      addMessage('bot', '', url);
       sendBtn.disabled = false;
       input.focus();
-    }
+    };
+    img.onerror = () => {
+      removeTyping();
+      addMessage('bot', 'দুঃখিত, ছবি বানানো যায়নি। আবার চেষ্টা করুন।');
+      sendBtn.disabled = false;
+      input.focus();
+    };
+    img.src = url;
     return;
   }
 
