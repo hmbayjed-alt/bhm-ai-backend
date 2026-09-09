@@ -422,6 +422,19 @@ function addMessage(role, text, imageUrl){
     bubble.appendChild(textNode);
   }
   wrap.appendChild(bubble);
+  if(role === 'bot' && text){
+    const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.textContent = '📋 কপি করুন';
+    copyBtn.style.cssText = 'margin-top:4px;border:none;background:transparent;color:var(--ink-400);font-size:11px;cursor:pointer;padding:2px 4px;';
+    copyBtn.addEventListener('click', () => {
+      navigator.clipboard.writeText(text).then(() => {
+        copyBtn.textContent = '✅ কপি হয়েছে';
+        setTimeout(() => { copyBtn.textContent = '📋 কপি করুন'; }, 1500);
+      }).catch(() => {});
+    });
+    wrap.appendChild(copyBtn);
+  }
   main.appendChild(wrap);
   scrollToBottom();
   return bubble;
@@ -505,11 +518,12 @@ newChatBtn.addEventListener('click', ()=>{
 /* Voice input (Web Speech API) — works in any language chosen from the selector */
 let recognition = null;
 let listening = false;
+let voiceBaseText = ''; // মাইক চালু করার আগে ইনপুট বক্সে যা লেখা ছিল
 const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
 
 if(SpeechRec){
   recognition = new SpeechRec();
-  recognition.continuous = false;
+  recognition.continuous = true;
   recognition.interimResults = true;
 
   recognition.onstart = ()=>{
@@ -522,7 +536,8 @@ if(SpeechRec){
     for(let i=0;i<e.results.length;i++){
       transcript += e.results[i][0].transcript;
     }
-    input.value = transcript;
+    const combined = voiceBaseText ? (voiceBaseText + ' ' + transcript) : transcript;
+    input.value = combined;
     autoGrow();
   };
   recognition.onerror = ()=>{
@@ -532,6 +547,8 @@ if(SpeechRec){
   recognition.onend = ()=>{
     listening = false;
     micBtn.classList.remove('listening');
+    // পরের বার মাইক চাপলে এখন পর্যন্ত যা লেখা হয়েছে সেটা বজায় রেখে তার পরে যোগ হবে
+    voiceBaseText = input.value;
     if(micStatus.textContent.includes('শুনছি')) micStatus.textContent = '🎤 যেকোনো ভাষায় বলুন';
   };
 
@@ -540,6 +557,7 @@ if(SpeechRec){
       recognition.stop();
       return;
     }
+    voiceBaseText = input.value.trim();
     recognition.lang = langSelect.value;
     try{ recognition.start(); }catch(err){}
   });
