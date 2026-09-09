@@ -281,6 +281,13 @@
           <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
         </svg>
       </button>
+      <button type="button" class="icon-btn mic-btn" id="imageGenBtn" title="ছবি বানান" aria-label="ছবি বানান">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+          <circle cx="8.5" cy="8.5" r="1.5"></circle>
+          <path d="M21 15l-5-5L5 21"></path>
+        </svg>
+      </button>
       <input type="file" id="fileInput" accept="image/*" style="display:none">
       <textarea id="chatInput" rows="1" placeholder="আপনার প্রশ্ন লিখুন..."></textarea>
       <button type="button" class="icon-btn mic-btn" id="micBtn" title="ভয়েস দিয়ে লিখুন" aria-label="মাইক্রোফোন">
@@ -346,6 +353,30 @@ const fileInput = document.getElementById('fileInput');
 const imagePreviewRow = document.getElementById('imagePreviewRow');
 const imagePreviewThumb = document.getElementById('imagePreviewThumb');
 const removeImageBtn = document.getElementById('removeImageBtn');
+const imageGenBtn = document.getElementById('imageGenBtn');
+
+let imageGenMode = false;
+
+imageGenBtn.addEventListener('click', () => {
+  imageGenMode = !imageGenMode;
+  imageGenBtn.classList.toggle('listening', imageGenMode);
+  input.placeholder = imageGenMode ? 'কী ছবি বানাবো লিখুন...' : 'আপনার প্রশ্ন লিখুন...';
+  input.focus();
+});
+
+async function generateImage(prompt){
+  const res = await fetch('/api/generate-image', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ prompt })
+  });
+  if(!res.ok){
+    const errData = await res.json().catch(()=>({}));
+    throw new Error(errData.error || 'request failed');
+  }
+  const data = await res.json();
+  return data; // { image: {mimeType, data}, caption }
+}
 
 let history = [];
 let pendingImage = null; // { mimeType, data (base64, no data: prefix), previewUrl }
@@ -497,6 +528,32 @@ async function callBHM(userText, image){
 async function sendMessage(){
   const text = input.value.trim();
   const image = pendingImage;
+
+  if(imageGenMode){
+    if(!text) return;
+    addMessage('user', text);
+    input.value = '';
+    autoGrow();
+    imageGenMode = false;
+    imageGenBtn.classList.remove('listening');
+    input.placeholder = 'আপনার প্রশ্ন লিখুন...';
+    sendBtn.disabled = true;
+    addTyping();
+    try{
+      const result = await generateImage(text);
+      removeTyping();
+      const dataUrl = `data:${result.image.mimeType};base64,${result.image.data}`;
+      addMessage('bot', result.caption || '', dataUrl);
+    }catch(err){
+      removeTyping();
+      addMessage('bot', err.message && err.message !== 'request failed' ? err.message : 'দুঃখিত, ছবি বানানো যায়নি। আবার চেষ্টা করুন।');
+    }finally{
+      sendBtn.disabled = false;
+      input.focus();
+    }
+    return;
+  }
+
   if(!text && !image) return;
   addMessage('user', text, image ? image.previewUrl : null);
   input.value = '';
