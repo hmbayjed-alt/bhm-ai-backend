@@ -172,6 +172,41 @@ app.post('/api/generate-image', chatLimiter, async (req, res) => {
   }
 });
 
+app.post('/api/enhance-prompt', chatLimiter, async (req, res) => {
+  try {
+    const { prompt } = req.body;
+    if (!prompt || typeof prompt !== 'string') {
+      return res.status(400).json({ error: 'prompt দরকার।' });
+    }
+
+    const instruction = `Translate and expand the following image description (which may be in Bengali or any language) into a single, vivid, detailed English image-generation prompt suitable for an AI image generator. Reply with ONLY the English prompt text — no quotes, no labels, no extra commentary.\n\nDescription: ${prompt}`;
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${API_KEY}`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: instruction }] }],
+        generationConfig: { maxOutputTokens: 200 }
+      })
+    });
+
+    if (!response.ok) {
+      // ব্যর্থ হলে মূল প্রম্পটটাই ফিরিয়ে দেওয়া হয়, যাতে ছবি বানানো একেবারে থেমে না যায়
+      return res.json({ prompt });
+    }
+
+    const data = await response.json();
+    const parts = data?.candidates?.[0]?.content?.parts || [];
+    const enhanced = parts.map((p) => p.text || '').join(' ').trim();
+
+    res.json({ prompt: enhanced || prompt });
+  } catch (err) {
+    console.error('Enhance prompt error:', err);
+    res.json({ prompt: req.body?.prompt || '' });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`✅ BHM AI backend চলছে: http://localhost:${PORT}`);
 });
