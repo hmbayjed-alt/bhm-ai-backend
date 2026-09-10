@@ -689,17 +689,33 @@ function addMessage(role, text, imageUrl){
   }
   wrap.appendChild(bubble);
   if(role === 'bot' && text){
+    const actionsRow = document.createElement('div');
+    actionsRow.style.cssText = 'display:flex;gap:10px;margin-top:4px;';
     const copyBtn = document.createElement('button');
     copyBtn.type = 'button';
     copyBtn.textContent = '📋 কপি করুন';
-    copyBtn.style.cssText = 'margin-top:4px;border:none;background:transparent;color:var(--ink-400);font-size:11px;cursor:pointer;padding:2px 4px;';
+    copyBtn.style.cssText = 'border:none;background:transparent;color:var(--ink-400);font-size:11px;cursor:pointer;padding:2px 4px;';
     copyBtn.addEventListener('click', () => {
       navigator.clipboard.writeText(text).then(() => {
         copyBtn.textContent = '✅ কপি হয়েছে';
         setTimeout(() => { copyBtn.textContent = '📋 কপি করুন'; }, 1500);
       }).catch(() => {});
     });
-    wrap.appendChild(copyBtn);
+    const shareBtn = document.createElement('button');
+    shareBtn.type = 'button';
+    shareBtn.textContent = '↗️ শেয়ার করুন';
+    shareBtn.style.cssText = 'border:none;background:transparent;color:var(--ink-400);font-size:11px;cursor:pointer;padding:2px 4px;';
+    shareBtn.addEventListener('click', () => {
+      if(navigator.share){
+        navigator.share({ text: text, title: 'BHM AI' }).catch(() => {});
+      }else{
+        const waUrl = 'https://wa.me/?text=' + encodeURIComponent(text);
+        window.open(waUrl, '_blank');
+      }
+    });
+    actionsRow.appendChild(copyBtn);
+    actionsRow.appendChild(shareBtn);
+    wrap.appendChild(actionsRow);
   }
   main.appendChild(wrap);
   scrollToBottom();
