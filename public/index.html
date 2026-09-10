@@ -713,8 +713,30 @@ function addMessage(role, text, imageUrl){
         window.open(waUrl, '_blank');
       }
     });
+    const speakBtn = document.createElement('button');
+    speakBtn.type = 'button';
+    speakBtn.textContent = '🔊 শুনুন';
+    speakBtn.style.cssText = 'border:none;background:transparent;color:var(--ink-400);font-size:11px;cursor:pointer;padding:2px 4px;';
+    speakBtn.addEventListener('click', () => {
+      if(!('speechSynthesis' in window)){
+        speakBtn.textContent = '⚠️ সাপোর্ট নেই';
+        setTimeout(()=>{ speakBtn.textContent = '🔊 শুনুন'; }, 2000);
+        return;
+      }
+      if(speechSynthesis.speaking){
+        speechSynthesis.cancel();
+        speakBtn.textContent = '🔊 শুনুন';
+        return;
+      }
+      const utter = new SpeechSynthesisUtterance(text);
+      utter.lang = 'bn-BD';
+      utter.onend = () => { speakBtn.textContent = '🔊 শুনুন'; };
+      speakBtn.textContent = '⏸️ থামান';
+      speechSynthesis.speak(utter);
+    });
     actionsRow.appendChild(copyBtn);
     actionsRow.appendChild(shareBtn);
+    actionsRow.appendChild(speakBtn);
     wrap.appendChild(actionsRow);
   }
   main.appendChild(wrap);
