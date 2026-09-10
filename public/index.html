@@ -487,20 +487,40 @@ function deleteConversation(id, evt){
   }
 }
 
+function togglePin(id, evt){
+  evt.stopPropagation();
+  const conv = conversations.find(c => c.id === id);
+  if(!conv) return;
+  conv.pinned = !conv.pinned;
+  saveConversations();
+  renderSidebarList();
+}
+
 function renderSidebarList(){
   conversationList.innerHTML = '';
-  const sorted = conversations.slice().sort((a,b)=> b.updatedAt - a.updatedAt);
+  const sorted = conversations.slice().sort((a,b)=>{
+    const pinDiff = (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0);
+    if(pinDiff !== 0) return pinDiff;
+    return b.updatedAt - a.updatedAt;
+  });
   sorted.forEach(conv => {
     const item = document.createElement('div');
     item.className = 'conv-item' + (conv.id === currentId ? ' active' : '');
     const titleSpan = document.createElement('span');
     titleSpan.className = 'conv-title';
-    titleSpan.textContent = conv.title || 'নতুন চ্যাট';
+    titleSpan.textContent = (conv.pinned ? '📌 ' : '') + (conv.title || 'নতুন চ্যাট');
+    const pinBtn = document.createElement('button');
+    pinBtn.className = 'conv-del';
+    pinBtn.title = conv.pinned ? 'আনপিন করুন' : 'পিন করুন';
+    pinBtn.style.opacity = conv.pinned ? '1' : '.45';
+    pinBtn.textContent = '📌';
+    pinBtn.addEventListener('click', (e)=> togglePin(conv.id, e));
     const delBtn = document.createElement('button');
     delBtn.className = 'conv-del';
     delBtn.textContent = '×';
     delBtn.addEventListener('click', (e)=> deleteConversation(conv.id, e));
     item.appendChild(titleSpan);
+    item.appendChild(pinBtn);
     item.appendChild(delBtn);
     item.addEventListener('click', ()=> openConversation(conv.id));
     conversationList.appendChild(item);
