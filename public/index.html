@@ -226,6 +226,16 @@
   }
   footer b{color:var(--ink-600);}
 
+  .conv-item{
+    display:flex;align-items:center;justify-content:space-between;gap:6px;
+    padding:10px 10px;margin:2px 0;border-radius:10px;cursor:pointer;
+    font-size:13px;color:var(--ink-900);
+  }
+  .conv-item:hover{background:var(--paper);}
+  .conv-item.active{background:#eaf0ff;font-weight:600;}
+  .conv-item .conv-title{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .conv-item .conv-del{border:none;background:transparent;color:var(--ink-400);font-size:15px;cursor:pointer;flex:none;padding:2px 4px;}
+
   @media (max-width:420px){
     .topics{grid-template-columns:repeat(2,1fr);}
     .intro h2{font-size:18px;}
@@ -236,6 +246,13 @@
 <div id="app">
 
   <header>
+    <button class="new-chat-btn" id="menuBtn" style="padding:8px 10px;" aria-label="মেনু">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="3" y1="6" x2="21" y2="6"></line>
+        <line x1="3" y1="12" x2="21" y2="12"></line>
+        <line x1="3" y1="18" x2="21" y2="18"></line>
+      </svg>
+    </button>
     <div class="logo">
       <svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
         <defs>
@@ -260,6 +277,16 @@
     </div>
     <button class="new-chat-btn" id="newChatBtn">নতুন চ্যাট</button>
   </header>
+
+  <div id="sidebarOverlay" style="display:none;position:fixed;inset:0;background:rgba(10,20,35,.4);z-index:20;"></div>
+  <div id="sidebarDrawer" style="position:fixed;top:0;left:0;bottom:0;width:280px;max-width:82vw;background:var(--card);z-index:21;transform:translateX(-100%);transition:transform .25s ease;box-shadow:6px 0 24px rgba(0,0,0,.15);display:flex;flex-direction:column;">
+    <div style="padding:16px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;">
+      <strong style="font-size:15px;">চ্যাট হিস্টরি</strong>
+      <button id="closeDrawerBtn" style="border:none;background:transparent;font-size:20px;cursor:pointer;color:var(--ink-400);">×</button>
+    </div>
+    <button id="drawerNewChatBtn" style="margin:12px 16px;padding:10px;border-radius:10px;border:none;background:var(--grad);color:#fff;font-family:inherit;font-weight:600;font-size:13.5px;cursor:pointer;">+ নতুন চ্যাট</button>
+    <div id="conversationList" style="flex:1;overflow-y:auto;padding:0 8px 12px;"></div>
+  </div>
 
   <main id="main">
     <div class="intro" id="intro">
@@ -373,25 +400,153 @@ let history = [];
 let pendingImage = null; // { mimeType, data (base64, no data: prefix), previewUrl }
 
 const MAX_IMAGE_MB = 4;
-const STORAGE_KEY = 'bhm_ai_chat_history';
+const CONV_KEY = 'bhm_ai_conversations';
+const CURRENT_ID_KEY = 'bhm_ai_current_conversation_id';
 
-function saveHistoryToStorage(){
+const menuBtn = document.getElementById('menuBtn');
+const sidebarOverlay = document.getElementById('sidebarOverlay');
+const sidebarDrawer = document.getElementById('sidebarDrawer');
+const closeDrawerBtn = document.getElementById('closeDrawerBtn');
+const drawerNewChatBtn = document.getElementById('drawerNewChatBtn');
+const conversationList = document.getElementById('conversationList');
+
+let conversations = [];
+let currentId = null;
+
+function loadConversations(){
   try{
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
-  }catch(e){ /* স্টোরেজ ভর্তি বা অনুপলব্ধ হলে চুপচাপ উপেক্ষা করা হবে */ }
+    const saved = localStorage.getItem(CONV_KEY);
+    conversations = saved ? JSON.parse(saved) : [];
+    if(!Array.isArray(conversations)) conversations = [];
+  }catch(e){ conversations = []; }
+}
+function saveConversations(){
+  try{ localStorage.setItem(CONV_KEY, JSON.stringify(conversations)); }catch(e){}
+}
+function setCurrentId(id){
+  currentId = id;
+  try{ localStorage.setItem(CURRENT_ID_KEY, id); }catch(e){}
 }
 
-function loadHistoryFromStorage(){
-  try{
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if(!saved) return;
-    const parsed = JSON.parse(saved);
-    if(!Array.isArray(parsed) || parsed.length === 0) return;
-    history = parsed;
-    parsed.forEach(m => {
-      addMessage(m.role === 'assistant' ? 'bot' : 'user', m.content);
-    });
-  }catch(e){ /* সংরক্ষিত ডেটা নষ্ট হলে চুপচাপ উপেক্ষা করা হবে */ }
+function makeTitle(msgs){
+  const firstUser = msgs.find(m => m.role === 'user');
+  if(!firstUser) return 'নতুন চ্যাট';
+  const t = firstUser.content.trim();
+  return t.length > 28 ? t.slice(0,28) + '…' : (t || 'নতুন চ্যাট');
+}
+
+function syncCurrentConversation(){
+  let conv = conversations.find(c => c.id === currentId);
+  if(!conv) return;
+  conv.messages = history;
+  conv.title = makeTitle(history);
+  conv.updatedAt = Date.now();
+  saveConversations();
+  renderSidebarList();
+}
+
+function createNewConversation(){
+  const id = 'c_' + Date.now() + '_' + Math.floor(Math.random()*10000);
+  const conv = { id, title:'নতুন চ্যাট', messages:[], updatedAt: Date.now() };
+  conversations.unshift(conv);
+  saveConversations();
+  setCurrentId(id);
+  history = [];
+  main.innerHTML = '';
+  main.appendChild(intro);
+  renderSidebarList();
+}
+
+function openConversation(id){
+  const conv = conversations.find(c => c.id === id);
+  if(!conv) return;
+  setCurrentId(id);
+  history = conv.messages.slice();
+  main.innerHTML = '';
+  if(history.length === 0){
+    main.appendChild(intro);
+  }else{
+    history.forEach(m => addMessage(m.role === 'assistant' ? 'bot' : 'user', m.content));
+  }
+  renderSidebarList();
+  closeDrawer();
+}
+
+function deleteConversation(id, evt){
+  evt.stopPropagation();
+  conversations = conversations.filter(c => c.id !== id);
+  saveConversations();
+  if(id === currentId){
+    if(conversations.length > 0){
+      openConversation(conversations[0].id);
+    }else{
+      createNewConversation();
+    }
+  }else{
+    renderSidebarList();
+  }
+}
+
+function renderSidebarList(){
+  conversationList.innerHTML = '';
+  const sorted = conversations.slice().sort((a,b)=> b.updatedAt - a.updatedAt);
+  sorted.forEach(conv => {
+    const item = document.createElement('div');
+    item.className = 'conv-item' + (conv.id === currentId ? ' active' : '');
+    const titleSpan = document.createElement('span');
+    titleSpan.className = 'conv-title';
+    titleSpan.textContent = conv.title || 'নতুন চ্যাট';
+    const delBtn = document.createElement('button');
+    delBtn.className = 'conv-del';
+    delBtn.textContent = '×';
+    delBtn.addEventListener('click', (e)=> deleteConversation(conv.id, e));
+    item.appendChild(titleSpan);
+    item.appendChild(delBtn);
+    item.addEventListener('click', ()=> openConversation(conv.id));
+    conversationList.appendChild(item);
+  });
+}
+
+function openDrawer(){
+  sidebarDrawer.style.transform = 'translateX(0)';
+  sidebarOverlay.style.display = 'block';
+}
+function closeDrawer(){
+  sidebarDrawer.style.transform = 'translateX(-100%)';
+  sidebarOverlay.style.display = 'none';
+}
+
+menuBtn.addEventListener('click', openDrawer);
+closeDrawerBtn.addEventListener('click', closeDrawer);
+sidebarOverlay.addEventListener('click', closeDrawer);
+drawerNewChatBtn.addEventListener('click', ()=>{ createNewConversation(); closeDrawer(); });
+
+function initConversations(){
+  loadConversations();
+  let savedCurrentId = null;
+  try{ savedCurrentId = localStorage.getItem(CURRENT_ID_KEY); }catch(e){}
+  const existing = conversations.find(c => c.id === savedCurrentId);
+  if(existing){
+    currentId = savedCurrentId;
+    history = existing.messages.slice();
+    if(history.length > 0){
+      main.innerHTML = '';
+      history.forEach(m => addMessage(m.role === 'assistant' ? 'bot' : 'user', m.content));
+    }
+  }else if(conversations.length > 0){
+    currentId = conversations[0].id;
+    history = conversations[0].messages.slice();
+    if(history.length > 0){
+      main.innerHTML = '';
+      history.forEach(m => addMessage(m.role === 'assistant' ? 'bot' : 'user', m.content));
+    }
+  }else{
+    const id = 'c_' + Date.now();
+    conversations.unshift({ id, title:'নতুন চ্যাট', messages:[], updatedAt: Date.now() });
+    currentId = id;
+    saveConversations();
+  }
+  renderSidebarList();
 }
 
 attachBtn.addEventListener('click', () => fileInput.click());
@@ -497,7 +652,7 @@ function removeTyping(){
 
 async function callBHM(userText, image){
   history.push({role:'user', content: userText});
-  saveHistoryToStorage();
+  syncCurrentConversation();
   const body = { messages: history };
   if(image){ body.image = { mimeType: image.mimeType, data: image.data }; }
   const res = await fetch('/api/chat', {
@@ -512,7 +667,7 @@ async function callBHM(userText, image){
   const data = await res.json();
   const reply = data.reply || 'দুঃখিত, উত্তর তৈরি করা যায়নি। আবার চেষ্টা করুন।';
   history.push({role:'assistant', content: reply});
-  saveHistoryToStorage();
+  syncCurrentConversation();
   return reply;
 }
 
@@ -594,15 +749,12 @@ input.addEventListener('keydown', (e)=>{
 });
 
 newChatBtn.addEventListener('click', ()=>{
-  history = [];
-  saveHistoryToStorage();
-  main.innerHTML = '';
-  main.appendChild(intro);
+  createNewConversation();
   input.value = '';
 });
 
-// পেজ লোড হওয়ার সময় আগের সংরক্ষিত কথোপকথন থাকলে সেটা ফিরিয়ে আনা
-loadHistoryFromStorage();
+// পেজ লোড হওয়ার সময় কথোপকথন তালিকা ও সর্বশেষ চ্যাট ফিরিয়ে আনা
+initConversations();
 
 /* Voice input (Web Speech API) — works in any language chosen from the selector */
 let recognition = null;
