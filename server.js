@@ -8,6 +8,7 @@ const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 const mammoth = require('mammoth');
 const XLSX = require('xlsx');
+const { convertBijoyToUnicode, shouldConvertAsBijoy } = require('bijoy2unicode');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -55,26 +56,34 @@ const MAX_EXTRACTED_CHARS = 6000;
 // docx/xlsx/xls/csv/txt ফাইল থেকে লেখা বের করে; না পারলে null রিটার্ন করে
 async function extractTextFromDocument(mimeType, buffer, fileName){
   try{
+    let text = null;
     if(mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || /\.docx$/i.test(fileName || '')){
       const result = await mammoth.extractRawText({ buffer });
-      return result.value;
+      text = result.value;
     }
-    if(
+    else if(
       mimeType === 'application/vnd.ms-excel' ||
       mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
       /\.(xlsx|xls)$/i.test(fileName || '')
     ){
       const wb = XLSX.read(buffer, { type: 'buffer' });
-      let text = '';
+      let t = '';
       wb.SheetNames.forEach((name) => {
-        text += `\n--- শীট: ${name} ---\n` + XLSX.utils.sheet_to_csv(wb.Sheets[name]);
+        t += `\n--- শীট: ${name} ---\n` + XLSX.utils.sheet_to_csv(wb.Sheets[name]);
       });
-      return text;
+      text = t;
     }
-    if(mimeType === 'text/plain' || mimeType === 'text/csv' || /\.(txt|csv)$/i.test(fileName || '')){
-      return buffer.toString('utf-8');
+    else if(mimeType === 'text/plain' || mimeType === 'text/csv' || /\.(txt|csv)$/i.test(fileName || '')){
+      text = buffer.toString('utf-8');
     }
-    return null; // অসমর্থিত ফরম্যাট (যেমন পুরনো .doc, .ppt)
+
+    if(text === null) return null; // অসমর্থিত ফরম্যাট (যেমন পুরনো .doc, .ppt)
+
+    // পুরনো "বিজয়"/SutonnyMJ ফন্টে লেখা টেক্সট হলে সেটাকে আসল ইউনিকোড বাংলায় রূপান্তর করা হয়
+    if(shouldConvertAsBijoy(text)){
+      text = convertBijoyToUnicode(text);
+    }
+    return text;
   }catch(err){
     console.error('Document extraction error:', err);
     return null;
