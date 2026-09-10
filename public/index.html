@@ -451,7 +451,7 @@ function syncCurrentConversation(){
   let conv = conversations.find(c => c.id === currentId);
   if(!conv) return;
   conv.messages = history;
-  conv.title = makeTitle(history);
+  if(!conv.customTitle){ conv.title = makeTitle(history); }
   conv.updatedAt = Date.now();
   saveConversations();
   renderSidebarList();
@@ -499,6 +499,21 @@ function deleteConversation(id, evt){
   }
 }
 
+function renameConversation(id, evt){
+  evt.stopPropagation();
+  const conv = conversations.find(c => c.id === id);
+  if(!conv) return;
+  const newTitle = prompt('চ্যাটের নাম দিন:', conv.title || 'নতুন চ্যাট');
+  if(newTitle === null) return; // ইউজার Cancel করলে কিছু বদলাবে না
+  const trimmed = newTitle.trim();
+  if(trimmed){
+    conv.customTitle = true;
+    conv.title = trimmed.length > 40 ? trimmed.slice(0,40) + '…' : trimmed;
+    saveConversations();
+    renderSidebarList();
+  }
+}
+
 function togglePin(id, evt){
   evt.stopPropagation();
   const conv = conversations.find(c => c.id === id);
@@ -527,12 +542,18 @@ function renderSidebarList(){
     pinBtn.style.opacity = conv.pinned ? '1' : '.45';
     pinBtn.textContent = '📌';
     pinBtn.addEventListener('click', (e)=> togglePin(conv.id, e));
+    const renameBtn = document.createElement('button');
+    renameBtn.className = 'conv-del';
+    renameBtn.title = 'নাম বদলান';
+    renameBtn.textContent = '✏️';
+    renameBtn.addEventListener('click', (e)=> renameConversation(conv.id, e));
     const delBtn = document.createElement('button');
     delBtn.className = 'conv-del';
     delBtn.textContent = '×';
     delBtn.addEventListener('click', (e)=> deleteConversation(conv.id, e));
     item.appendChild(titleSpan);
     item.appendChild(pinBtn);
+    item.appendChild(renameBtn);
     item.appendChild(delBtn);
     item.addEventListener('click', ()=> openConversation(conv.id));
     conversationList.appendChild(item);
