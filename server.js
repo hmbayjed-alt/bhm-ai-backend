@@ -6,6 +6,8 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
+const mammoth = require('mammoth');
+const XLSX = require('xlsx');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -42,6 +44,43 @@ const SYSTEM_PROMPT = `তুমি "BHM AI" (বি এইচ এম এ আই
 "আমাকে BHM Media YouTube Channel-এর পরিচালক তৈরি করেছেন।"
 `;
 
+// এই মডেলগুলো ছবি/PDF-এর মতো সরাসরি Gemini-কে পাঠানো যায় (inlineData হিসেবে)
+const NATIVE_MIME_TYPES = new Set(['application/pdf']);
+function isNativeType(mimeType){
+  return mimeType.startsWith('image/') || NATIVE_MIME_TYPES.has(mimeType);
+}
+
+const MAX_EXTRACTED_CHARS = 6000;
+
+// docx/xlsx/xls/csv/txt ফাইল থেকে লেখা বের করে; না পারলে null রিটার্ন করে
+async function extractTextFromDocument(mimeType, buffer, fileName){
+  try{
+    if(mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || /\.docx$/i.test(fileName || '')){
+      const result = await mammoth.extractRawText({ buffer });
+      return result.value;
+    }
+    if(
+      mimeType === 'application/vnd.ms-excel' ||
+      mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+      /\.(xlsx|xls)$/i.test(fileName || '')
+    ){
+      const wb = XLSX.read(buffer, { type: 'buffer' });
+      let text = '';
+      wb.SheetNames.forEach((name) => {
+        text += `\n--- শীট: ${name} ---\n` + XLSX.utils.sheet_to_csv(wb.Sheets[name]);
+      });
+      return text;
+    }
+    if(mimeType === 'text/plain' || mimeType === 'text/csv' || /\.(txt|csv)$/i.test(fileName || '')){
+      return buffer.toString('utf-8');
+    }
+    return null; // অসমর্থিত ফরম্যাট (যেমন পুরনো .doc, .ppt)
+  }catch(err){
+    console.error('Document extraction error:', err);
+    return null;
+  }
+}
+
 // health check
 app.get('/api/health', (req, res) => {
   res.json({ ok: true, service: 'BHM AI backend' });
@@ -49,7 +88,7 @@ app.get('/api/health', (req, res) => {
 
 app.post('/api/chat', chatLimiter, async (req, res) => {
   try {
-    const { messages, image } = req.body;
+    const { messages, image: file } = req.body;
 
     if (!Array.isArray(messages) || messages.length === 0) {
       return res.status(400).json({ error: 'messages অ্যারে দরকার।' });
@@ -58,14 +97,32 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
     // মেসেজ হিস্টোরি অতিরিক্ত বড় হলে সার্ভার/API খরচ (ও ফ্রি-টায়ার কোটা) বাঁচাতে সীমিত রাখা
     const trimmed = messages.slice(-20);
 
+    // সংযুক্ত ফাইল থাকলে সেটা কীভাবে ব্যবহার হবে আগেভাগে ঠিক করে নেওয়া হয়
+    let extractedDocText = null;
+    let unsupportedFile = false;
+    if (file && file.data && file.mimeType && !isNativeType(file.mimeType)) {
+      const buffer = Buffer.from(file.data, 'base64');
+      extractedDocText = await extractTextFromDocument(file.mimeType, buffer, file.name);
+      if (extractedDocText === null) unsupportedFile = true;
+      else if (extractedDocText.length > MAX_EXTRACTED_CHARS) {
+        extractedDocText = extractedDocText.slice(0, MAX_EXTRACTED_CHARS) + '\n...(বাকি অংশ ছেঁটে ফেলা হয়েছে)';
+      }
+    }
+
     // আমাদের {role:'user'|'assistant', content:'...'} ফরম্যাটকে Gemini-র
     // {role:'user'|'model', parts:[{text}]} ফরম্যাটে রূপান্তর
     const contents = trimmed.map((m, idx) => {
-      const parts = [{ text: m.content }];
-      // সবশেষ মেসেজে যদি ছবি সংযুক্ত থাকে, সেটা inlineData হিসেবে যোগ করা হয়
       const isLast = idx === trimmed.length - 1;
-      if (isLast && image && image.data && image.mimeType) {
-        parts.push({ inlineData: { mimeType: image.mimeType, data: image.data } });
+      let text = m.content;
+      if (isLast && extractedDocText) {
+        text = `[সংযুক্ত ফাইল "${file.name || 'document'}" থেকে নেওয়া লেখা]\n${extractedDocText}\n\n[ব্যবহারকারীর প্রশ্ন]\n${m.content}`;
+      }
+      if (isLast && unsupportedFile) {
+        text = `${m.content}\n\n(নোট: "${file.name || 'ফাইলটি'}" এই ফরম্যাটটি এই মুহূর্তে সাপোর্ট করা হয় না — শুধু ছবি, PDF, Word (.docx), Excel (.xls/.xlsx), .csv ও .txt ফাইল পড়া যায়। ব্যবহারকারীকে বিনয়ের সাথে এটা জানাও।)`;
+      }
+      const parts = [{ text }];
+      if (isLast && file && file.data && file.mimeType && isNativeType(file.mimeType)) {
+        parts.push({ inlineData: { mimeType: file.mimeType, data: file.data } });
       }
       return {
         role: m.role === 'assistant' ? 'model' : 'user',
