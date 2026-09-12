@@ -38,6 +38,8 @@ const SYSTEM_PROMPT = `তুমি "BHM AI" (বি এইচ এম এ আই
 - বিষয়ভিত্তিক পরিসর: শিক্ষা, কুরআন, হাদিস, তাফসীর, ইজমা, কিয়াস, বিজ্ঞান, প্রযুক্তি, কৃষি, ইতিহাস, ভূগোল, সাধারণ জ্ঞান, গণিত, প্রোগ্রামিং, ব্যবসা, স্বাস্থ্য, খেলাধুলা, বিনোদন, YouTube, AI, মোবাইল, কম্পিউটার এবং যেকোনো সাধারণ প্রশ্ন।
 - প্রয়োজনে ধাপে ধাপে ব্যাখ্যা করো, উদাহরণ দাও।
 - ইসলামিক বিষয়ে (কুরআন/হাদিস/তাফসীর/ফিকহ) উত্তর দেওয়ার সময় সতর্ক ও যত্নশীল থাকো; নিশ্চিত না হলে স্পষ্টভাবে বলো যে একজন আলেমের কাছ থেকে যাচাই করে নেওয়া ভালো, এবং কখনো নিজে থেকে ফতোয়া দিও না।
+- কুরআনের কোনো নির্দিষ্ট আয়াতের উল্লেখ করলে, উত্তরের সেই জায়গায় ঠিক এই ফরম্যাটে একটা ট্যাগ বসাবে: [QREF:সূরা_নম্বর:আয়াত_নম্বর] — উদাহরণ: [QREF:2:255]। এই ট্যাগটা স্বয়ংক্রিয়ভাবে যাচাইকৃত আসল আয়াত দিয়ে প্রতিস্থাপিত হবে, তাই তুমি নিজে আয়াতের হুবহু আরবি/অনুবাদ লেখার দরকার নেই, শুধু প্রসঙ্গ ও ব্যাখ্যা লিখবে।
+- হাদিসের কোনো নির্দিষ্ট বর্ণনার উল্লেখ করলে, ঠিক এই ফরম্যাটে ট্যাগ বসাবে: [HREF:বই:নম্বর] — বই এর মান হতে পারে শুধু এগুলোর একটা: bukhari, muslim, abudawud, tirmidhi, nasai, ibnmajah, malik। উদাহরণ: [HREF:bukhari:1]। শিওর না হলে কোনো নম্বর অনুমান করে বসিও না — সেক্ষেত্রে ট্যাগ ছাড়াই সাধারণভাবে উত্তর দাও এবং বলো নির্দিষ্ট রেফারেন্স যাচাই করা দরকার।
 - স্বাস্থ্য/আইনি বিষয়ে সাধারণ তথ্য দাও, কিন্তু বলে দাও যে বিশেষজ্ঞের পরামর্শ নেওয়া উচিত।
 - টোন হবে বন্ধুত্বপূর্ণ, আধুনিক এবং শ্রদ্ধাশীল।
 - সবসময় প্লেইন টেক্সট লিখবে — কোনো মার্কডাউন ফরম্যাটিং (যেমন **, #, ---, ব্যাকটিক) ব্যবহার করবে না, কারণ চ্যাট বক্সে এগুলো হুবহু চিহ্ন হিসেবে দেখা যায়। জোর দিতে চাইলে শুধু সাধারণ বাক্য গঠন বা লাইন ব্রেক ব্যবহার করো।
@@ -94,6 +96,103 @@ async function extractTextFromDocument(mimeType, buffer, fileName){
 app.get('/api/health', (req, res) => {
   res.json({ ok: true, service: 'BHM AI backend' });
 });
+
+// ===== ইসলামিক সোর্স যাচাইকরণ (Quran.com/Tanzil ও নির্ভরযোগ্য হাদিস ডেটাবেজ থেকে) =====
+
+const HADITH_BOOK_NAMES = {
+  bukhari: 'সহীহ বুখারী',
+  muslim: 'সহীহ মুসলিম',
+  abudawud: 'সুনানে আবু দাউদ',
+  tirmidhi: 'জামে তিরমিযী',
+  nasai: 'সুনানে নাসাঈ',
+  ibnmajah: 'সুনানে ইবনে মাজাহ',
+  malik: 'মুয়াত্তা মালিক'
+};
+
+async function fetchQuranVerse(chapter, verse) {
+  try {
+    const base = 'https://raw.githubusercontent.com/fawazahmed0/quran-api/1/editions';
+    const [arRes, bnRes] = await Promise.all([
+      fetch(`${base}/ara-quranuthmanihaf/${chapter}/${verse}.json`),
+      fetch(`${base}/ben-muhiuddinkhan/${chapter}/${verse}.json`)
+    ]);
+    if (!arRes.ok || !bnRes.ok) return null;
+    const ar = await arRes.json();
+    const bn = await bnRes.json();
+    return { arabic: ar.text, bangla: bn.text };
+  } catch (e) {
+    console.error('Quran fetch error:', e);
+    return null;
+  }
+}
+
+async function fetchHadith(book, number) {
+  if (!HADITH_BOOK_NAMES[book]) return null;
+  try {
+    const url = `https://raw.githubusercontent.com/fawazahmed0/hadith-api/1/editions/ben-${book}/${number}.json`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const hadith = data?.hadiths?.[0];
+    if (!hadith || !hadith.text) return null;
+    return { text: hadith.text };
+  } catch (e) {
+    console.error('Hadith fetch error:', e);
+    return null;
+  }
+}
+
+// AI-এর উত্তরে থাকা [QREF:..] ও [HREF:..] ট্যাগগুলো যাচাই করে আসল উৎস দিয়ে প্রতিস্থাপন/সংযোজন করে
+async function verifyIslamicReferences(replyText) {
+  const qrefRegex = /\[QREF:(\d{1,3}):(\d{1,3})\]/g;
+  const hrefRegex = /\[HREF:(bukhari|muslim|abudawud|tirmidhi|nasai|ibnmajah|malik):(\d+)\]/g;
+
+  const qMatches = [...replyText.matchAll(qrefRegex)];
+  const hMatches = [...replyText.matchAll(hrefRegex)];
+
+  if (qMatches.length === 0 && hMatches.length === 0) {
+    return replyText; // কোনো রেফারেন্স ট্যাগ নেই, যাচাইয়ের দরকার নেই
+  }
+
+  let sourceBlock = '';
+  let processedText = replyText;
+
+  // কুরআনের রেফারেন্স যাচাই
+  const uniqueQ = [...new Set(qMatches.map(m => `${m[1]}:${m[2]}`))];
+  for (const key of uniqueQ) {
+    const [chapter, verse] = key.split(':');
+    const verified = await fetchQuranVerse(chapter, verse);
+    const tag = `[QREF:${chapter}:${verse}]`;
+    if (verified) {
+      processedText = processedText.split(tag).join(`(কুরআন ${chapter}:${verse})`);
+      sourceBlock += `\n\n📖 কুরআন ${chapter}:${verse}\nআরবি: ${verified.arabic}\nবাংলা অর্থ: ${verified.bangla}`;
+    } else {
+      processedText = processedText.split(tag).join(`(কুরআন ${chapter}:${verse} — উৎস যাচাই করা যায়নি)`);
+    }
+  }
+
+  // হাদিসের রেফারেন্স যাচাই
+  const uniqueH = [...new Set(hMatches.map(m => `${m[1]}:${m[2]}`))];
+  for (const key of uniqueH) {
+    const [book, number] = key.split(':');
+    const verified = await fetchHadith(book, number);
+    const tag = `[HREF:${book}:${number}]`;
+    const bookName = HADITH_BOOK_NAMES[book] || book;
+    if (verified) {
+      processedText = processedText.split(tag).join(`(${bookName}, হাদিস নং ${number})`);
+      const shortText = verified.text.length > 600 ? verified.text.slice(0, 600) + '…' : verified.text;
+      sourceBlock += `\n\n📕 ${bookName}, হাদিস নং ${number}\n${shortText}`;
+    } else {
+      processedText = processedText.split(tag).join(`(${bookName}, হাদিস নং ${number} — উৎস যাচাই করা যায়নি)`);
+    }
+  }
+
+  if (sourceBlock) {
+    processedText += '\n\n— যাচাইকৃত মূল উৎস —' + sourceBlock;
+  }
+
+  return processedText;
+}
 
 app.post('/api/chat', chatLimiter, async (req, res) => {
   try {
@@ -181,8 +280,10 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
 
     const data = await response.json();
     const parts = data?.candidates?.[0]?.content?.parts || [];
-    const reply = parts.map((p) => p.text || '').join('\n').trim()
+    let reply = parts.map((p) => p.text || '').join('\n').trim()
       || 'দুঃখিত, উত্তর তৈরি করা যায়নি। আবার চেষ্টা করুন।';
+
+    reply = await verifyIslamicReferences(reply);
 
     res.json({ reply });
   } catch (err) {
