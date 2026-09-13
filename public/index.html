@@ -918,10 +918,15 @@ if(SpeechRec){
     autoGrow();
   };
   recognition.onerror = (e)=>{
-    if(e.error === 'not-allowed' || e.error === 'audio-capture'){
-      userStoppedListening = true; // অনুমতি না থাকলে আর চেষ্টা করে লাভ নেই
-      micStatus.textContent = '⚠️ মাইক্রোফোনের অনুমতি দিন';
-      setTimeout(()=>{ micStatus.textContent = '🎤 যেকোনো ভাষায় বলুন'; }, 3000);
+    if(e.error === 'not-allowed' || e.error === 'audio-capture' || e.error === 'service-not-allowed'){
+      userStoppedListening = true;
+      micStatus.textContent = '⚠️ মাইক্রোফোনের অনুমতি দিন (ব্রাউজার সেটিংস চেক করুন)';
+      setTimeout(()=>{ micStatus.textContent = '🎤 যেকোনো ভাষায় বলুন'; }, 3500);
+    }else if(e.error === 'no-speech'){
+      // কিছু শোনা যায়নি, স্বাভাবিক — auto-restart চলবে
+    }else{
+      micStatus.textContent = '⚠️ এরর: ' + e.error;
+      setTimeout(()=>{ micStatus.textContent = '🎤 যেকোনো ভাষায় বলুন'; }, 3500);
     }
   };
   recognition.onend = ()=>{
@@ -940,7 +945,7 @@ if(SpeechRec){
     }
   };
 
-  micBtn.addEventListener('click', ()=>{
+  micBtn.addEventListener('click', async ()=>{
     if(listening){
       userStoppedListening = true;
       recognition.stop();
@@ -949,7 +954,25 @@ if(SpeechRec){
     userStoppedListening = false;
     voiceBaseText = input.value.trim();
     recognition.lang = langSelect.value;
-    try{ recognition.start(); }catch(err){}
+
+    // Android Chrome-এ মাঝেমধ্যে SpeechRecognition একাই অনুমতি চাইতে ব্যর্থ হয় —
+    // তাই আগে সরাসরি getUserMedia দিয়ে মাইক্রোফোনের অনুমতি নিশ্চিত করে নেওয়া হয়
+    if(navigator.mediaDevices && navigator.mediaDevices.getUserMedia){
+      try{
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach(t => t.stop()); // শুধু অনুমতির জন্য, স্ট্রিম রাখার দরকার নেই
+      }catch(err){
+        userStoppedListening = true;
+        micStatus.textContent = '⚠️ মাইক্রোফোনের অনুমতি পাওয়া যায়নি';
+        setTimeout(()=>{ micStatus.textContent = '🎤 যেকোনো ভাষায় বলুন'; }, 3000);
+        return;
+      }
+    }
+
+    try{ recognition.start(); }catch(err){
+      micStatus.textContent = '⚠️ শুরু করা যায়নি: ' + (err.message || err);
+      setTimeout(()=>{ micStatus.textContent = '🎤 যেকোনো ভাষায় বলুন'; }, 3500);
+    }
   });
 }else{
   micBtn.addEventListener('click', ()=>{
