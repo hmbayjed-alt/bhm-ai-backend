@@ -892,12 +892,15 @@ initConversations();
 /* Voice input (Web Speech API) — works in any language chosen from the selector */
 let recognition = null;
 let listening = false;
+let userStoppedListening = true; // ব্যবহারকারী নিজে থামিয়েছে কিনা তা ট্র্যাক করে
 let voiceBaseText = ''; // মাইক চালু করার আগে ইনপুট বক্সে যা লেখা ছিল
 const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
 
 if(SpeechRec){
   recognition = new SpeechRec();
-  recognition.continuous = true;
+  // "continuous" মোড Android/iPhone ব্রাউজারে অনির্ভরযোগ্য, তাই এটা বন্ধ রেখে
+  // প্রতিবার থেমে গেলে কোড নিজে থেকে আবার শুরু করে — এতে ডেস্কটপ ও মোবাইল দুই জায়গাতেই কাজ করে
+  recognition.continuous = false;
   recognition.interimResults = true;
 
   recognition.onstart = ()=>{
@@ -914,23 +917,36 @@ if(SpeechRec){
     input.value = combined;
     autoGrow();
   };
-  recognition.onerror = ()=>{
-    micStatus.textContent = '🎤 শোনা যায়নি, আবার চেষ্টা করুন';
-    setTimeout(()=>{ micStatus.textContent = '🎤 যেকোনো ভাষায় বলুন'; }, 2500);
+  recognition.onerror = (e)=>{
+    if(e.error === 'not-allowed' || e.error === 'audio-capture'){
+      userStoppedListening = true; // অনুমতি না থাকলে আর চেষ্টা করে লাভ নেই
+      micStatus.textContent = '⚠️ মাইক্রোফোনের অনুমতি দিন';
+      setTimeout(()=>{ micStatus.textContent = '🎤 যেকোনো ভাষায় বলুন'; }, 3000);
+    }
   };
   recognition.onend = ()=>{
     listening = false;
     micBtn.classList.remove('listening');
-    // পরের বার মাইক চাপলে এখন পর্যন্ত যা লেখা হয়েছে সেটা বজায় রেখে তার পরে যোগ হবে
-    voiceBaseText = input.value;
-    if(micStatus.textContent.includes('শুনছি')) micStatus.textContent = '🎤 যেকোনো ভাষায় বলুন';
+    voiceBaseText = input.value; // এখন পর্যন্ত যা লেখা হয়েছে সংরক্ষণ করা
+    if(!userStoppedListening){
+      // ব্যবহারকারী থামাননি — একটু পর নিজে থেকেই আবার শোনা শুরু হবে
+      setTimeout(()=>{
+        if(!userStoppedListening){
+          try{ recognition.start(); }catch(err){}
+        }
+      }, 300);
+    }else if(micStatus.textContent.includes('শুনছি')){
+      micStatus.textContent = '🎤 যেকোনো ভাষায় বলুন';
+    }
   };
 
   micBtn.addEventListener('click', ()=>{
     if(listening){
+      userStoppedListening = true;
       recognition.stop();
       return;
     }
+    userStoppedListening = false;
     voiceBaseText = input.value.trim();
     recognition.lang = langSelect.value;
     try{ recognition.start(); }catch(err){}
