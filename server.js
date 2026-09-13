@@ -191,7 +191,7 @@ async function verifyIslamicReferences(replyText) {
   }
 
   if (sourceBlock) {
-    processedText += '\n\n— যাচাইকৃত মূল উৎস —' + sourceBlock;
+    processedText += '\n\n— যাচাইকৃত মূল উৎস —\n(নিচের আসল লেখাটা উপরের ব্যাখ্যার সাথে না মিললে বুঝবেন AI ভুল নম্বর/রেফারেন্স বলেছে — তখন উপরের ব্যাখ্যাটা নিজে যাচাই করে নিন)' + sourceBlock;
   }
 
   return processedText;
@@ -245,7 +245,7 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
     const requestBody = JSON.stringify({
       contents,
       systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
-      generationConfig: { maxOutputTokens: 2000 }
+      generationConfig: { maxOutputTokens: 4000 }
     });
 
     // সাময়িক (503) ত্রুটি হলে কয়েক সেকেন্ড অপেক্ষা করে স্বয়ংক্রিয়ভাবে আবার চেষ্টা করা হয়
