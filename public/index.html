@@ -481,7 +481,7 @@ function openConversation(id){
   if(history.length === 0){
     main.appendChild(intro);
   }else{
-    history.forEach(m => addMessage(m.role === 'assistant' ? 'bot' : 'user', m.content));
+    history.forEach((m, idx) => addMessage(m.role === 'assistant' ? 'bot' : 'user', m.content, null, idx));
   }
   renderSidebarList();
   closeDrawer();
@@ -603,14 +603,14 @@ function initConversations(){
     history = existing.messages.slice();
     if(history.length > 0){
       main.innerHTML = '';
-      history.forEach(m => addMessage(m.role === 'assistant' ? 'bot' : 'user', m.content));
+      history.forEach((m, idx) => addMessage(m.role === 'assistant' ? 'bot' : 'user', m.content, null, idx));
     }
   }else if(conversations.length > 0){
     currentId = conversations[0].id;
     history = conversations[0].messages.slice();
     if(history.length > 0){
       main.innerHTML = '';
-      history.forEach(m => addMessage(m.role === 'assistant' ? 'bot' : 'user', m.content));
+      history.forEach((m, idx) => addMessage(m.role === 'assistant' ? 'bot' : 'user', m.content, null, idx));
     }
   }else{
     const id = 'c_' + Date.now();
@@ -685,7 +685,7 @@ function scrollToBottom(){
   main.scrollTop = main.scrollHeight;
 }
 
-function addMessage(role, text, imageUrl){
+function addMessage(role, text, imageUrl, histIndex){
   if(intro.parentNode) intro.remove();
   const wrap = document.createElement('div');
   wrap.className = 'msg ' + (role === 'user' ? 'user' : 'bot');
@@ -758,9 +758,68 @@ function addMessage(role, text, imageUrl){
       speakBtn.textContent = '⏸️ থামান';
       speechSynthesis.speak(utter);
     });
+    const likeBtn = document.createElement('button');
+    likeBtn.type = 'button';
+    likeBtn.textContent = '👍';
+    likeBtn.title = 'ভালো লেগেছে';
+    likeBtn.style.cssText = 'border:none;background:transparent;color:var(--ink-400);font-size:12px;cursor:pointer;padding:2px 4px;';
+    const dislikeBtn = document.createElement('button');
+    dislikeBtn.type = 'button';
+    dislikeBtn.textContent = '👎';
+    dislikeBtn.title = 'ভালো লাগেনি';
+    dislikeBtn.style.cssText = 'border:none;background:transparent;color:var(--ink-400);font-size:12px;cursor:pointer;padding:2px 4px;';
+    likeBtn.addEventListener('click', () => {
+      likeBtn.style.opacity = '1'; dislikeBtn.style.opacity = '.4';
+      const old = likeBtn.textContent;
+      likeBtn.textContent = '👍 ধন্যবাদ!';
+      setTimeout(()=>{ likeBtn.textContent = old; }, 1500);
+    });
+    dislikeBtn.addEventListener('click', () => {
+      dislikeBtn.style.opacity = '1'; likeBtn.style.opacity = '.4';
+      const old = dislikeBtn.textContent;
+      dislikeBtn.textContent = '👎 নোট হলো';
+      setTimeout(()=>{ dislikeBtn.textContent = old; }, 1500);
+    });
+
+    const regenBtn = document.createElement('button');
+    regenBtn.type = 'button';
+    regenBtn.textContent = '🔄 আবার তৈরি করুন';
+    regenBtn.title = 'নতুন করে উত্তর তৈরি করুন';
+    regenBtn.style.cssText = 'border:none;background:transparent;color:var(--ink-400);font-size:11px;cursor:pointer;padding:2px 4px;';
+    const bubbleTextNode = bubble.querySelector('div');
+    regenBtn.addEventListener('click', async () => {
+      if(histIndex === undefined || histIndex === null) return;
+      const contextMessages = history.slice(0, histIndex);
+      if(contextMessages.length === 0) return;
+      const originalLabel = regenBtn.textContent;
+      regenBtn.disabled = true;
+      regenBtn.textContent = '⏳ তৈরি হচ্ছে...';
+      try{
+        const res = await fetch('/api/chat', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ messages: contextMessages })
+        });
+        if(!res.ok){ throw new Error('failed'); }
+        const data = await res.json();
+        const newReply = data.reply || 'দুঃখিত, উত্তর তৈরি করা যায়নি।';
+        history[histIndex] = { role:'assistant', content: newReply };
+        syncCurrentConversation();
+        if(bubbleTextNode){ bubbleTextNode.textContent = newReply; }
+      }catch(e){
+        alert('আবার উত্তর তৈরি করা যায়নি, একটু পর চেষ্টা করুন।');
+      }finally{
+        regenBtn.disabled = false;
+        regenBtn.textContent = originalLabel;
+      }
+    });
+
     actionsRow.appendChild(copyBtn);
     actionsRow.appendChild(shareBtn);
     actionsRow.appendChild(speakBtn);
+    actionsRow.appendChild(likeBtn);
+    actionsRow.appendChild(dislikeBtn);
+    actionsRow.appendChild(regenBtn);
     wrap.appendChild(actionsRow);
   }
   main.appendChild(wrap);
@@ -860,7 +919,7 @@ async function sendMessage(){
     const fallbackQuestion = image && !image.isImage ? 'এই PDF ফাইলটা সম্পর্কে বলো।' : 'এই ছবিটা সম্পর্কে বলো।';
     const reply = await callBHM(text || fallbackQuestion, image);
     removeTyping();
-    addMessage('bot', reply);
+    addMessage('bot', reply, null, history.length - 1);
   }catch(err){
     removeTyping();
     addMessage('bot', err.message && err.message !== 'request failed' ? err.message : 'দুঃখিত, একটি সমস্যা হয়েছে। ইন্টারনেট সংযোগ পরীক্ষা করে আবার চেষ্টা করুন।');
