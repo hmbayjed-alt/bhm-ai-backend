@@ -703,6 +703,42 @@ function addMessage(role, text, imageUrl, histIndex){
     bubble.appendChild(textNode);
   }
   wrap.appendChild(bubble);
+  if(role === 'user' && text){
+    const userActionsRow = document.createElement('div');
+    userActionsRow.style.cssText = 'display:flex;gap:10px;margin-top:4px;justify-content:flex-end;';
+    const uCopyBtn = document.createElement('button');
+    uCopyBtn.type = 'button';
+    uCopyBtn.textContent = '📋 কপি করুন';
+    uCopyBtn.style.cssText = 'border:none;background:transparent;color:var(--ink-400);font-size:11px;cursor:pointer;padding:2px 4px;';
+    uCopyBtn.addEventListener('click', () => {
+      navigator.clipboard.writeText(text).then(() => {
+        uCopyBtn.textContent = '✅ কপি হয়েছে';
+        setTimeout(() => { uCopyBtn.textContent = '📋 কপি করুন'; }, 1500);
+      }).catch(() => {});
+    });
+    const uEditBtn = document.createElement('button');
+    uEditBtn.type = 'button';
+    uEditBtn.textContent = '✏️ এডিট';
+    uEditBtn.style.cssText = 'border:none;background:transparent;color:var(--ink-400);font-size:11px;cursor:pointer;padding:2px 4px;';
+    uEditBtn.addEventListener('click', () => {
+      input.value = text;
+      autoGrow();
+      input.focus();
+      window.scrollTo({ top: document.body.scrollHeight });
+    });
+    const uRetryBtn = document.createElement('button');
+    uRetryBtn.type = 'button';
+    uRetryBtn.textContent = '🔁 রিট্রাই';
+    uRetryBtn.style.cssText = 'border:none;background:transparent;color:var(--ink-400);font-size:11px;cursor:pointer;padding:2px 4px;';
+    uRetryBtn.addEventListener('click', () => {
+      input.value = text;
+      sendMessage();
+    });
+    userActionsRow.appendChild(uCopyBtn);
+    userActionsRow.appendChild(uEditBtn);
+    userActionsRow.appendChild(uRetryBtn);
+    wrap.appendChild(userActionsRow);
+  }
   if(role === 'bot' && text){
     const actionsRow = document.createElement('div');
     actionsRow.style.cssText = 'display:flex;gap:10px;margin-top:4px;';
