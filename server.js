@@ -53,7 +53,7 @@ const SYSTEM_PROMPT = `তুমি "BHM AI" (বি এইচ এম এ আই
 // এই মডেলগুলো ছবি/PDF-এর মতো সরাসরি Gemini-কে পাঠানো যায় (inlineData হিসেবে)
 const NATIVE_MIME_TYPES = new Set(['application/pdf']);
 function isNativeType(mimeType){
-  return mimeType.startsWith('image/') || NATIVE_MIME_TYPES.has(mimeType);
+  return mimeType.startsWith('image/') || mimeType.startsWith('audio/') || NATIVE_MIME_TYPES.has(mimeType);
 }
 
 const MAX_EXTRACTED_CHARS = 6000;
@@ -377,6 +377,57 @@ app.post('/api/enhance-prompt', chatLimiter, async (req, res) => {
   }
 });
 
+// ===== নামাজের সময় ও কিবলা দিক (Aladhan.com-এর ফ্রি API, key ছাড়াই) =====
+
+app.get('/api/prayer-times', async (req, res) => {
+  try {
+    const { lat, lng } = req.query;
+    if (!lat || !lng) {
+      return res.status(400).json({ error: 'lat ও lng দরকার।' });
+    }
+    const today = new Date();
+    const dateStr = `${String(today.getDate()).padStart(2,'0')}-${String(today.getMonth()+1).padStart(2,'0')}-${today.getFullYear()}`;
+    const url = `https://api.aladhan.com/v1/timings/${dateStr}?latitude=${lat}&longitude=${lng}&method=1`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      return res.status(502).json({ error: 'নামাজের সময় আনা যায়নি।' });
+    }
+    const data = await response.json();
+    const t = data?.data?.timings || {};
+    res.json({
+      timings: {
+        Fajr: t.Fajr, Sunrise: t.Sunrise, Dhuhr: t.Dhuhr,
+        Asr: t.Asr, Maghrib: t.Maghrib, Isha: t.Isha
+      },
+      date: data?.data?.date?.readable || ''
+    });
+  } catch (err) {
+    console.error('Prayer times error:', err);
+    res.status(500).json({ error: 'সার্ভারে একটি সমস্যা হয়েছে।' });
+  }
+});
+
+app.get('/api/qibla', async (req, res) => {
+  try {
+    const { lat, lng } = req.query;
+    if (!lat || !lng) {
+      return res.status(400).json({ error: 'lat ও lng দরকার।' });
+    }
+    const url = `https://api.aladhan.com/v1/qibla/${lat}/${lng}`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      return res.status(502).json({ error: 'কিবলা দিক আনা যায়নি।' });
+    }
+    const data = await response.json();
+    res.json({ direction: data?.data?.direction });
+  } catch (err) {
+    console.error('Qibla error:', err);
+    res.status(500).json({ error: 'সার্ভারে একটি সমস্যা হয়েছে।' });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`✅ BHM AI backend চলছে: http://localhost:${PORT}`);
 });
+
+
