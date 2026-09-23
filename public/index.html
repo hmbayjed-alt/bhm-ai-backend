@@ -671,8 +671,18 @@ prayerBtn.addEventListener('click', () => {
     }catch(e){
       prayerContent.innerHTML = '⚠️ তথ্য আনতে সমস্যা হয়েছে, আবার চেষ্টা করুন।';
     }
-  }, () => {
-    prayerContent.innerHTML = '⚠️ অবস্থানের অনুমতি পাওয়া যায়নি। ব্রাউজার/ফোনের সেটিংসে লোকেশন অনুমতি চালু করুন।';
+  }, (err) => {
+    let msg = '⚠️ অবস্থানের অনুমতি পাওয়া যায়নি। ব্রাউজার/ফোনের সেটিংসে লোকেশন অনুমতি চালু করুন।';
+    if(err && err.code === err.TIMEOUT){
+      msg = '⚠️ অবস্থান খুঁজে পেতে অনেক সময় লাগছে — ফোনের GPS/Location চালু আছে কিনা দেখুন, তারপর আবার চেষ্টা করুন।';
+    }else if(err && err.code === err.POSITION_UNAVAILABLE){
+      msg = '⚠️ এই মুহূর্তে অবস্থান নির্ণয় করা যাচ্ছে না — ফোনের Location/GPS চালু করে আবার চেষ্টা করুন।';
+    }
+    prayerContent.innerHTML = msg;
+  }, {
+    enableHighAccuracy: false,
+    timeout: 12000,
+    maximumAge: 300000
   });
 });
 closePrayerBtn.addEventListener('click', () => { prayerOverlay.style.display = 'none'; });
