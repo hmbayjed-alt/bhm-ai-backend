@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://bhm-ai-backend.onrender.com/sitemap.xml
