@@ -1,1 +1,26 @@
-
+{
+  "name": "BHM AI - বি এইচ এম এ আই",
+  "short_name": "BHM AI",
+  "description": "আপনার সর্ববিষয়ক AI সহায়ক — শিক্ষা, কুরআন-হাদিস-তাফসীর, বিজ্ঞান, প্রযুক্তি ও আরও অনেক কিছু",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f5f8fb",
+  "theme_color": "#2f6fed",
+  "orientation": "portrait",
+  "lang": "bn",
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
