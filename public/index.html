@@ -1058,6 +1058,7 @@ async function callBHM(userText, image, signal){
 }
 
 async function sendMessage(){
+  stopVoiceForSend(); // চলমান ভয়েস শোনা থাকলে আগে বন্ধ করা
   const text = input.value.trim();
   const image = pendingImage;
 
@@ -1180,11 +1181,113 @@ newChatBtn.addEventListener('click', ()=>{
 initConversations();
 
 /* Voice input (Web Speech API) — works in any language chosen from the selector */
+
+/* VOICE-HELPERS-START */
+// বাংলা বর্ণ (যেমন ড়, য়) দুই ভাবে লেখা যায়; তুলনার আগে সব এক রূপে (NFC) আনা হয়
+const nfc = (s) => (s || '').normalize('NFC');
+
+// মুখে বলা যতিচিহ্নের শব্দ → চিহ্ন। দ্রষ্টব্য: শুধু "দাড়ি" (মুখের দাড়ি অর্থে) ইচ্ছাকৃতভাবে
+// এখানে নেই, যাতে "দাড়ি রাখার হুকুম" জাতীয় বাক্য ভেঙে না যায়। দাঁড়ির জন্য "দাঁড়ি চিহ্ন" বলুন।
+const SPOKEN_PUNCT_DEFS = {
+  bn: [
+    ['।', ['দাঁড়ি চিহ্ন', 'দাড়ি চিহ্ন', 'দাঁড়ি', 'পূর্ণচ্ছেদ', 'পূর্ণ ছেদ', 'ফুলস্টপ', 'ফুল স্টপ']],
+    [',', ['কমা']],
+    ['?', ['প্রশ্নবোধক চিহ্ন', 'প্রশ্ন চিহ্ন', 'প্রশ্নবোধক']],
+    ['!', ['বিস্ময়সূচক চিহ্ন', 'বিস্ময় চিহ্ন', 'বিস্ময়সূচক', 'আশ্চর্যবোধক চিহ্ন', 'আশ্চর্যবোধক']],
+    [';', ['সেমিকোলন']],
+    [':', ['কোলন']]
+  ],
+  en: [
+    ['.', ['full stop', 'period']],
+    [',', ['comma']],
+    ['?', ['question mark']],
+    ['!', ['exclamation mark', 'exclamation point']]
+  ]
+};
+const SPOKEN_PUNCT_RULES = {};
+Object.keys(SPOKEN_PUNCT_DEFS).forEach((lang) => {
+  SPOKEN_PUNCT_RULES[lang] = SPOKEN_PUNCT_DEFS[lang].map(([mark, phrases]) => [
+    mark,
+    new RegExp('(^|\\s)(' + phrases.map(nfc).join('|') + ')(?=\\s|$)', 'gi')
+  ]);
+});
+
+function applySpokenPunctuation(text, lang) {
+  let out = nfc(text);
+  const rules = SPOKEN_PUNCT_RULES[(lang || '').slice(0, 2)];
+  if (rules) {
+    rules.forEach(([mark, re]) => { out = out.replace(re, mark); });
+  }
+  return out.replace(/\s+([,।?!;:.])/g, '$1');
+}
+
+// প্রশ্নসূচক শব্দ থাকলে "?", না থাকলে ভাষা অনুযায়ী পূর্ণচ্ছেদ। এটা আন্দাজভিত্তিক, নিখুঁত নয়।
+const BN_QUESTION_WORDS = new Set([
+  'কি', 'কী', 'কেন', 'কোথায়', 'কখন', 'কবে', 'কে', 'কাকে', 'কার', 'কাদের', 'কত', 'কতটা', 'কতটুকু',
+  'কতগুলো', 'কোনটা', 'কোনটি', 'কোনগুলো', 'কেমন', 'কীভাবে', 'কিভাবে', 'কিসের', 'কিসে',
+  'কয়টি', 'কয়টা', 'কয়জন', 'নাকি'
+].map(nfc));
+const HI_QUESTION_WORDS = new Set([
+  'क्या', 'कौन', 'कब', 'कहाँ', 'कहां', 'क्यों', 'कैसे', 'कितना', 'कितनी', 'कितने', 'किस', 'किसे', 'किसको'
+].map(nfc));
+const EN_QUESTION_STARTERS = new Set([
+  'what', 'why', 'how', 'who', 'whom', 'whose', 'when', 'where', 'which', 'is', 'are', 'am', 'was',
+  'were', 'do', 'does', 'did', 'can', 'could', 'will', 'would', 'shall', 'should', 'may', 'might',
+  'have', 'has', 'had'
+]);
+
+function endPunctuationFor(runText, lang) {
+  const l = (lang || '').slice(0, 2);
+  const sentences = nfc(runText).split(/[।?!.]/).filter((s) => s.trim());
+  const last = (sentences.length ? sentences[sentences.length - 1] : runText).trim();
+  const tokens = last.split(/\s+/).map((w) => w.replace(/[,;:"'()]/g, '').toLowerCase()).filter(Boolean);
+  if (l === 'bn') return tokens.some((w) => BN_QUESTION_WORDS.has(w)) ? '?' : '।';
+  if (l === 'hi') return tokens.some((w) => HI_QUESTION_WORDS.has(w)) ? '?' : '।';
+  if (l === 'en') return EN_QUESTION_STARTERS.has(tokens[0]) ? '?' : '.';
+  return ''; // অন্য ভাষায় নিজে থেকে কিছু বসানো হবে না
+}
+
+// কার্সরের আগের অংশ (before), পরের অংশ (after) আর নতুন বলা লেখা (t) জুড়ে সঠিক স্পেসসহ ফলাফল বানায়
+function composeVoiceText(before, after, t) {
+  const lead = (before && !/\s$/.test(before) && !/^[,।?!;:.]/.test(t)) ? ' ' : '';
+  const trail = (after && !/^[\s,।?!;:.]/.test(after)) ? ' ' : '';
+  return { insert: lead + t, value: before + lead + t + trail + after, caret: (before + lead + t).length };
+}
+/* VOICE-HELPERS-END */
+
 let recognition = null;
 let listening = false;
 let userStoppedListening = true; // ব্যবহারকারী নিজে থামিয়েছে কিনা তা ট্র্যাক করে
-let voiceBaseText = ''; // মাইক চালু করার আগে ইনপুট বক্সে যা লেখা ছিল
+let suppressFinish = false;      // মেসেজ পাঠানোর জন্য থামালে শেষে চিহ্ন বসানো হবে না
+let voiceBefore = '';            // কার্সরের আগের লেখা (এখন পর্যন্ত বলা অংশসহ)
+let voiceAfter = '';             // কার্সরের পরের লেখা
+let lastInsert = '';             // চলতি সেশনে বসানো অংশ
+let runStart = 0;                // এই ভয়েস-দফার শুরুর অবস্থান
 const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+// মেসেজ পাঠানোর সময় চলমান ভয়েস শোনা বন্ধ করা, যাতে পাঠানো লেখা আবার ইনপুটে ফিরে না আসে
+function stopVoiceForSend() {
+  if (recognition && (listening || !userStoppedListening)) {
+    userStoppedListening = true;
+    suppressFinish = true;
+    try { recognition.abort(); } catch (e) {}
+  }
+  voiceBefore = ''; voiceAfter = ''; lastInsert = '';
+}
+
+// ব্যবহারকারী নিজে থামালে, কার্সর একদম শেষে থাকলে লেখার শেষে দাঁড়ি/প্রশ্নচিহ্ন বসানো
+function finishDictation() {
+  if (suppressFinish) { suppressFinish = false; return; }
+  const runText = voiceBefore.slice(runStart);
+  if (!runText.trim() || voiceAfter.trim() !== '') return; // মাঝখানে বসালে শেষে কিছু বসে না
+  if (/[,।?!;:.]\s*$/.test(runText)) return;               // আগে থেকেই চিহ্ন আছে
+  const mark = endPunctuationFor(runText, recognition.lang);
+  if (!mark) return;
+  voiceBefore = voiceBefore.replace(/\s+$/, '') + mark;
+  input.value = voiceBefore + voiceAfter;
+  input.setSelectionRange(voiceBefore.length, voiceBefore.length);
+  autoGrow();
+}
 
 if(SpeechRec){
   recognition = new SpeechRec();
@@ -1199,30 +1302,37 @@ if(SpeechRec){
     micStatus.textContent = '🎙️ শুনছি... বলুন';
   };
   recognition.onresult = (e)=>{
+    if(suppressFinish) return; // পাঠানোর জন্য থামানো হয়েছে, আর কিছু বসবে না
     let transcript = '';
     for(let i=0;i<e.results.length;i++){
       transcript += e.results[i][0].transcript;
     }
-    const combined = voiceBaseText ? (voiceBaseText + ' ' + transcript) : transcript;
-    input.value = combined;
+    const t = applySpokenPunctuation(transcript, recognition.lang).trim();
+    const r = composeVoiceText(voiceBefore, voiceAfter, t);
+    lastInsert = t ? r.insert : '';
+    input.value = t ? r.value : (voiceBefore + voiceAfter);
+    const caret = t ? r.caret : voiceBefore.length;
+    input.setSelectionRange(caret, caret);
     autoGrow();
   };
   recognition.onerror = (e)=>{
-    if(e.error === 'not-allowed' || e.error === 'audio-capture' || e.error === 'service-not-allowed'){
-      userStoppedListening = true;
-      micStatus.textContent = '⚠️ মাইক্রোফোনের অনুমতি দিন (ব্রাউজার সেটিংস চেক করুন)';
-      setTimeout(()=>{ micStatus.textContent = '🎤 যেকোনো ভাষায় বলুন'; }, 3500);
-    }else if(e.error === 'no-speech'){
-      // কিছু শোনা যায়নি, স্বাভাবিক — auto-restart চলবে
-    }else{
-      micStatus.textContent = '⚠️ এরর: ' + e.error;
-      setTimeout(()=>{ micStatus.textContent = '🎤 যেকোনো ভাষায় বলুন'; }, 3500);
+    if(e.error === 'no-speech'){
+      return; // কিছু শোনা যায়নি, স্বাভাবিক — auto-restart চলবে
     }
+    // বাকি সব এরর-এ আর বারবার চেষ্টা না করে থেমে যাওয়াই নিরাপদ
+    userStoppedListening = true;
+    if(e.error === 'not-allowed' || e.error === 'audio-capture' || e.error === 'service-not-allowed'){
+      micStatus.textContent = '⚠️ মাইক্রোফোনের অনুমতি দিন (ব্রাউজার সেটিংস চেক করুন)';
+    }else if(e.error !== 'aborted'){
+      micStatus.textContent = '⚠️ এরর: ' + e.error;
+    }
+    setTimeout(()=>{ micStatus.textContent = '🎤 যেকোনো ভাষায় বলুন'; }, 3500);
   };
   recognition.onend = ()=>{
     listening = false;
     micBtn.classList.remove('listening');
-    voiceBaseText = input.value; // এখন পর্যন্ত যা লেখা হয়েছে সংরক্ষণ করা
+    // এই সেশনে যা বসানো হয়েছে তা স্থায়ী করা — পরের সেশন ঠিক এর পরেই বসবে
+    if(lastInsert){ voiceBefore += lastInsert; lastInsert = ''; }
     if(!userStoppedListening){
       // ব্যবহারকারী থামাননি — একটু পর নিজে থেকেই আবার শোনা শুরু হবে
       setTimeout(()=>{
@@ -1230,8 +1340,11 @@ if(SpeechRec){
           try{ recognition.start(); }catch(err){}
         }
       }, 300);
-    }else if(micStatus.textContent.includes('শুনছি')){
-      micStatus.textContent = '🎤 যেকোনো ভাষায় বলুন';
+    }else{
+      finishDictation();
+      if(micStatus.textContent.includes('শুনছি')){
+        micStatus.textContent = '🎤 যেকোনো ভাষায় বলুন';
+      }
     }
   };
 
@@ -1241,8 +1354,17 @@ if(SpeechRec){
       recognition.stop();
       return;
     }
+    // শুরুর মুহূর্তে কার্সর/সিলেকশন কোথায় আছে সেটা ধরে রাখা — বলা লেখা ঠিক সেখানেই বসবে
+    const val = input.value;
+    let selStart = input.selectionStart;
+    let selEnd = input.selectionEnd;
+    if(typeof selStart !== 'number'){ selStart = selEnd = val.length; }
+    voiceBefore = val.slice(0, selStart);
+    voiceAfter = val.slice(selEnd);
+    runStart = voiceBefore.length;
+    lastInsert = '';
+    suppressFinish = false;
     userStoppedListening = false;
-    voiceBaseText = input.value.trim();
     recognition.lang = langSelect.value;
 
     // Android Chrome-এ মাঝেমধ্যে SpeechRecognition একাই অনুমতি চাইতে ব্যর্থ হয় —
@@ -1260,6 +1382,7 @@ if(SpeechRec){
     }
 
     try{ recognition.start(); }catch(err){
+      userStoppedListening = true;
       micStatus.textContent = '⚠️ শুরু করা যায়নি: ' + (err.message || err);
       setTimeout(()=>{ micStatus.textContent = '🎤 যেকোনো ভাষায় বলুন'; }, 3500);
     }
