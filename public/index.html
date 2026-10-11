@@ -1225,7 +1225,7 @@ function applySpokenPunctuation(text, lang) {
 const BN_QUESTION_WORDS = new Set([
   'কি', 'কী', 'কেন', 'কোথায়', 'কখন', 'কবে', 'কে', 'কাকে', 'কার', 'কাদের', 'কত', 'কতটা', 'কতটুকু',
   'কতগুলো', 'কোনটা', 'কোনটি', 'কোনগুলো', 'কেমন', 'কীভাবে', 'কিভাবে', 'কিসের', 'কিসে',
-  'কয়টি', 'কয়টা', 'কয়জন', 'নাকি'
+  'কয়টি', 'কয়টা', 'কয়জন', 'নাকি', 'কিনা'
 ].map(nfc));
 const HI_QUESTION_WORDS = new Set([
   'क्या', 'कौन', 'कब', 'कहाँ', 'कहां', 'क्यों', 'कैसे', 'कितना', 'कितनी', 'कितने', 'किस', 'किसे', 'किसको'
@@ -1267,6 +1267,7 @@ const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
 
 // মেসেজ পাঠানোর সময় চলমান ভয়েস শোনা বন্ধ করা, যাতে পাঠানো লেখা আবার ইনপুটে ফিরে না আসে
 function stopVoiceForSend() {
+  punctSeq++;
   if (recognition && (listening || !userStoppedListening)) {
     userStoppedListening = true;
     suppressFinish = true;
@@ -1275,18 +1276,57 @@ function stopVoiceForSend() {
   voiceBefore = ''; voiceAfter = ''; lastInsert = '';
 }
 
-// ব্যবহারকারী নিজে থামালে, কার্সর একদম শেষে থাকলে লেখার শেষে দাঁড়ি/প্রশ্নচিহ্ন বসানো
+// ব্যবহারকারী নিজে থামালে, কার্সর একদম শেষে থাকলে: আগে সঙ্গে সঙ্গে আন্দাজে শেষ-চিহ্ন বসে,
+// তারপর Gemini দিয়ে পুরো বাক্যে সঠিক যতিচিহ্ন বসানোর চেষ্টা হয়
+let punctSeq = 0; // নতুন কিছু ঘটলে আগের অপেক্ষমাণ উত্তর বাতিল করার জন্য
 function finishDictation() {
   if (suppressFinish) { suppressFinish = false; return; }
   const runText = voiceBefore.slice(runStart);
   if (!runText.trim() || voiceAfter.trim() !== '') return; // মাঝখানে বসালে শেষে কিছু বসে না
-  if (/[,।?!;:.]\s*$/.test(runText)) return;               // আগে থেকেই চিহ্ন আছে
-  const mark = endPunctuationFor(runText, recognition.lang);
-  if (!mark) return;
-  voiceBefore = voiceBefore.replace(/\s+$/, '') + mark;
-  input.value = voiceBefore + voiceAfter;
-  input.setSelectionRange(voiceBefore.length, voiceBefore.length);
-  autoGrow();
+  if (!/[,।?!;:.]\s*$/.test(runText)) {
+    const mark = endPunctuationFor(runText, recognition.lang);
+    if (mark) {
+      voiceBefore = voiceBefore.replace(/\s+$/, '') + mark;
+      input.value = voiceBefore + voiceAfter;
+      input.setSelectionRange(voiceBefore.length, voiceBefore.length);
+      autoGrow();
+    }
+  }
+  improvePunctuation();
+}
+
+async function improvePunctuation() {
+  const runText = voiceBefore.slice(runStart);
+  const core = runText.trim();
+  const lang = (recognition.lang || '').slice(0, 2);
+  if (core.split(/\s+/).length < 3 || !['bn', 'en', 'hi'].includes(lang)) return;
+  const seq = ++punctSeq;
+  const expectedValue = input.value;
+  const prefix = voiceBefore.slice(0, runStart);
+  const leading = runText.match(/^\s*/)[0];
+  const after = voiceAfter;
+  micStatus.textContent = '✍️ যতিচিহ্ন বসানো হচ্ছে...';
+  try {
+    const res = await fetch('/api/punctuate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: core, lang })
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    // এর মধ্যে লেখা বদলে গেলে (পাঠানো, মোছা, নতুন করে বলা) আর কিছু বদলানো হবে না
+    if (seq !== punctSeq || input.value !== expectedValue || !data.changed || !data.text) return;
+    voiceBefore = prefix + leading + data.text;
+    input.value = voiceBefore + after;
+    input.setSelectionRange(voiceBefore.length, voiceBefore.length);
+    autoGrow();
+  } catch (e) {
+    /* ব্যর্থ হলে আন্দাজে বসানো চিহ্নই থেকে যাবে */
+  } finally {
+    if (seq === punctSeq && micStatus.textContent.includes('যতিচিহ্ন')) {
+      micStatus.textContent = '🎤 যেকোনো ভাষায় বলুন';
+    }
+  }
 }
 
 if(SpeechRec){
@@ -1364,6 +1404,7 @@ if(SpeechRec){
     runStart = voiceBefore.length;
     lastInsert = '';
     suppressFinish = false;
+    punctSeq++;
     userStoppedListening = false;
     recognition.lang = langSelect.value;
 
